@@ -1,0 +1,96 @@
+---
+title: "Project 2 Approach: Data Tidying and Transformation"
+author: "Ummay Rukiya"
+format: html
+editor: visual
+---
+
+## Overview
+
+For this project, I plan to work with three wide-format datasets and transform each one into a tidy format using `tidyr` and `dplyr` in R. The datasets focus on life expectancy, income distribution, and inflation. Although the topics are different, each dataset stores repeated measurements across multiple columns instead of placing them in separate rows.
+
+I will treat each dataset as a separate analysis. For each one, I will preserve the original wide structure in a raw CSV file and upload that file to GitHub. I will then import the data into R, reshape it into a tidy format, clean missing or inconsistent values, and complete the analysis proposed in its original Discussion 5A post.
+
+## Dataset 1: World Bank Life Expectancy
+
+### Data Source
+
+The first dataset is the [Life Expectancy at Birth dataset from the World Bank](https://data.worldbank.org/indicator/SP.DYN.LE00.IN). It contains annual life-expectancy measurements for countries and regions beginning in 1960.
+
+### Current Structure
+
+The downloaded dataset is wide because each year is stored in a separate column. The identifying information, such as the country name and country code, appears at the beginning of each row, followed by many year columns.
+
+### Planned Transformation
+
+I will import the raw World Bank CSV file into R and use `pivot_longer()` to move the year columns into two variables: `year` and `life_expectancy`. I will rename the remaining columns using a consistent naming style and convert the year and life-expectancy values into the correct data types.
+
+Some country-and-year combinations may contain missing values. I will keep those values as `NA` and exclude them only from calculations that require an available life-expectancy measurement. I will not replace missing values with zero because zero would not represent a reasonable life expectancy.
+
+### Planned Analysis
+
+I plan to compare life expectancy in Bangladesh and the United States over time. I will create a line chart showing both countries and calculate the difference between their life-expectancy values by year. This will help me determine whether the gap between the two countries has increased or decreased.
+
+I may also calculate the overall improvement for each country by comparing its earliest and latest available measurements. This would make it possible to identify countries that experienced some of the largest increases in life expectancy and compare those changes with worldwide patterns.
+
+## Dataset 2: New York Income Distribution
+
+### Data Source
+
+The second dataset comes from the [Bureau of Economic Analysis Distribution of Personal Income data](https://www.bea.gov/data/special-topics/distribution-of-personal-income). It contains information about how disposable income in New York is distributed across five income groups for four selected years between 2012 and 2024.
+
+### Current Structure
+
+This dataset is wide because each year is represented by two columns. One column contains the income group’s share of disposable income, while the other contains the income range for that group. The income ranges are also stored as text containing dollar signs, commas, and other symbols.
+
+### Planned Transformation
+
+I will preserve the original table in a raw CSV file before making any changes. In R, I will use `pivot_longer()` to move the repeated year-based columns into rows. I will then separate the original column names into a `year` variable and a `measurement_type` variable so the income share and income range can be identified correctly.
+
+I will clean the income-range text by removing dollar signs, commas, and other unnecessary symbols. If a range contains both a lower and upper value, I will separate those values into two consistently named columns. Empty source cells will remain missing instead of being replaced with zero.
+
+### Planned Analysis
+
+I plan to compare how each income group’s share of New York’s disposable income changed between the selected years. I will also examine how the income ranges for the five groups changed during the same period.
+
+Because the Bureau of Economic Analysis warns that the 2020 values came from a smaller sample, I will pay special attention to that year. I will compare the 2020 results with the surrounding years and clearly mention this limitation when interpreting any unusual changes.
+
+## Dataset 3: United States Inflation Rates
+
+### Data Source
+
+The third dataset is the Annual Inflation Rates table from the [U.S. Inflation Calculator website](https://www.usinflationcalculator.com/inflation/current-inflation-rates/). The website reports CPI-based inflation rates published by the U.S. Bureau of Labor Statistics.
+
+### Current Structure
+
+The table is wide because each month is stored in a separate column. Every row represents one year, while the January through December values and annual average appear across different columns. Some cells may contain text announcing when a future value will become available instead of containing a numeric inflation rate.
+
+### Planned Transformation
+
+I will first create a raw CSV file that preserves the table’s original wide layout. I will then import it into R and use `pivot_longer()` to move the monthly columns into rows. The tidy version will contain separate variables for `year`, `month`, and `inflation_rate`.
+
+I will keep the annual average separate from the monthly observations because it represents a different type of measurement. Month names will be converted into a properly ordered variable so they appear chronologically in tables and charts. Text announcements and unavailable values will be changed to `NA`, and the inflation-rate column will be converted into numeric form.
+
+### Planned Analysis
+
+I plan to examine how U.S. inflation changed both month to month and year to year. I will create a time-series line chart showing how quickly inflation increased during the 2021–2022 period and how it changed afterward.
+
+I will also compare December’s inflation rate with the reported annual average for each year. This may show how much movement within a year is hidden when only the annual average is considered. Finally, I will look for possible seasonal patterns by comparing the same months across different years.
+
+## Reproducibility and Documentation
+
+Each raw dataset will be committed to a public GitHub repository before it is transformed. I plan to create a separate Quarto file for each dataset so the data source, original structure, transformation steps, analysis, and conclusions remain clearly separated.
+
+All transformations will be completed using reproducible R code. I will use consistent variable names, comments, spacing, and section headings. The analyses will use only the tidy versions of the datasets rather than calculating results directly from the original wide tables.
+
+## Anticipated Challenges
+
+One challenge will be that the three datasets have different structures. The life-expectancy dataset has many year columns, the income dataset combines years with measurement types, and the inflation dataset combines monthly values with annual averages.
+
+Another challenge will be handling missing and inconsistent values without changing their meaning. I will examine the raw values before deciding how to handle them and document each decision in the appropriate Quarto file. I will also check that every file can run from a clean R session without manual changes.
+
+## Expected Outcome
+
+The final project will contain three independent and reproducible analyses. Each analysis will begin with a raw wide-format dataset, demonstrate how the data were transformed into a tidy format, and use the resulting tidy data to answer a specific question with summary tables, visualizations, and written interpretations.
+
+## 
