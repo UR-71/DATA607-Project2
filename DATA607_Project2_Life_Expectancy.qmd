@@ -1,0 +1,300 @@
+---
+title: "Project 2: World Bank Life Expectancy"
+author: "Ummay Rukiya"
+date: "2026-10-08"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: flatly
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Overview
+
+For this part of Project 2, I will tidy and analyze the World Bank Life Expectancy at Birth dataset. The original dataset stores every year in a separate column, making it a wide-format dataset. I will transform it into a tidy format with one row for each country and year.
+
+My main analysis will compare life expectancy in Bangladesh and the United States over time. I will also examine whether the gap between the two countries has increased or decreased.
+
+## Data Source
+
+The dataset comes from the [World Bank Life Expectancy at Birth indicator](https://data.worldbank.org/indicator/SP.DYN.LE00.IN). It contains annual life-expectancy measurements for countries and regions beginning in 1960.
+
+The original wide-format CSV file was uploaded to my public GitHub repository so the analysis can be reproduced directly from an internet source.
+
+## Loading Required Packages
+
+```{r}
+library(tidyverse)
+library(knitr)
+```
+
+## Importing the Raw Wide-Format Data
+
+The original World Bank CSV contains several descriptive lines above the actual column names. I used `skip = 4` so R begins reading from the row containing the dataset’s column names.
+
+```{r}
+raw_data_url <- paste0(
+  "https://cdn.jsdelivr.net/gh/UR-71/",
+  "DATA607-Project2@main/",
+  "world_bank_life_expectancy_wide.csv"
+)
+
+life_expectancy_wide <- readr::read_csv(
+  raw_data_url,
+  skip = 4,
+  show_col_types = FALSE
+)
+
+dim(life_expectancy_wide)
+
+head(life_expectancy_wide[, 1:10])
+```
+
+## Data Structure Before Tidying
+
+The original data set contains 265 rows and 71 columns. Each row represents a country or region. The first four columns contain identifying information, while the remaining columns contain life-expectancy values for separate years. This structure is wide because the years are being used as column names.
+
+```{r}
+data.frame(
+  rows = nrow(life_expectancy_wide),
+  columns = ncol(life_expectancy_wide)
+)
+
+names(life_expectancy_wide)
+
+kable(
+  head(life_expectancy_wide[, 1:10]),
+  caption = "Sample of the Original Wide-Format Dataset"
+)
+```
+
+## Transforming the Data from Wide to Long Format
+
+I used `pivot_longer()` to move the year columns into rows. The tidy dataset contains one column for the country, one for the year, and one for the life-expectancy value. I kept missing measurements as `NA` during the transformation so that no information from the original dataset was incorrectly replaced.
+
+```{r}
+life_expectancy_tidy <- life_expectancy_wide |>
+  select(-starts_with("...")) |>
+  rename(
+    country_name = `Country Name`,
+    country_code = `Country Code`,
+    indicator_name = `Indicator Name`,
+    indicator_code = `Indicator Code`
+  ) |>
+  pivot_longer(
+    cols = matches("^[0-9]{4}$"),
+    names_to = "year",
+    values_to = "life_expectancy"
+  ) |>
+  mutate(
+    year = as.integer(year),
+    life_expectancy = as.numeric(life_expectancy)
+  ) |>
+  arrange(country_name, year)
+
+dim(life_expectancy_tidy)
+
+head(life_expectancy_tidy)
+```
+
+## Handling Missing Values
+
+Some country-and-year combinations do not have a reported life-expectancy value. I kept these values as `NA` while tidying the data set so the original missing information would remain visible. For the analysis, I created a separate dataframe that excludes rows with missing life-expectancy values. I did not replace them with zero because zero would not be a meaningful life-expectancy measurement.
+
+```{r}
+missing_value_summary <- life_expectancy_tidy |>
+  summarize(
+    total_rows = n(),
+    missing_values = sum(is.na(life_expectancy)),
+    percent_missing = round(
+      mean(is.na(life_expectancy)) * 100,
+      2
+    )
+  )
+
+missing_value_summary
+
+life_expectancy_analysis <- life_expectancy_tidy |>
+  filter(!is.na(life_expectancy))
+
+dim(life_expectancy_analysis)
+
+range(life_expectancy_analysis$year)
+```
+
+## Comparing Bangladesh and the United States
+
+I selected Bangladesh and the United States for the main comparison. The following summary shows each country’s earliest and latest available life-expectancy measurement and the total change between those years.
+
+```{r}
+country_comparison <- life_expectancy_analysis |>
+  filter(country_code %in% c("BGD", "USA")) |>
+  select(
+    country_name,
+    country_code,
+    year,
+    life_expectancy
+  )
+
+country_summary <- country_comparison |>
+  group_by(country_name, country_code) |>
+  arrange(year, .by_group = TRUE) |>
+  summarize(
+    starting_year = first(year),
+    starting_life_expectancy = first(life_expectancy),
+    ending_year = last(year),
+    ending_life_expectancy = last(life_expectancy),
+    total_increase = last(life_expectancy) -
+      first(life_expectancy),
+    .groups = "drop"
+  ) |>
+  mutate(
+    across(
+      c(
+        starting_life_expectancy,
+        ending_life_expectancy,
+        total_increase
+      ),
+      ~ round(.x, 2)
+    )
+  )
+
+kable(
+  country_summary,
+  caption = paste(
+    "Life Expectancy Changes in Bangladesh",
+    "and the United States"
+  )
+)
+```
+
+## Life Expectancy Over Time
+
+The following line chart shows how life expectancy changed in Bangladesh and the United States between 1960 and 2024.
+
+```{r}
+ggplot(
+  country_comparison,
+  aes(
+    x = year,
+    y = life_expectancy,
+    color = country_name
+  )
+) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = paste(
+      "Life Expectancy in Bangladesh",
+      "and the United States"
+    ),
+    x = "Year",
+    y = "Life Expectancy at Birth (Years)",
+    color = "Country"
+  ) +
+  scale_color_manual(
+    values = c(
+      "Bangladesh" = "#2C7FB8",
+      "United States" = "#D95F0E"
+    )
+  ) +
+  theme_minimal()
+```
+
+## Interpretation of Country Trends
+
+Both countries experienced an increase in life expectancy between 1960 and 2024, but the improvement was much larger in Bangladesh. Bangladesh’s life expectancy increased from 43.98 years to 74.93 years, which was a gain of 30.95 years. During the same period, life expectancy in the United States increased from 69.77 years to 78.89 years, a gain of 9.12 years. The two lines became much closer over time, suggesting that the life-expectancy gap between the countries decreased.
+
+## Measuring the Life-Expectancy Gap
+
+To measure the gap directly, I reshaped the two-country data so Bangladesh and the United States had separate columns. I then subtracted Bangladesh’s life expectancy from the United States’ life expectancy for each year.
+
+```{r}
+life_expectancy_gap <- country_comparison |>
+  select(
+    country_code,
+    year,
+    life_expectancy
+  ) |>
+  pivot_wider(
+    names_from = country_code,
+    values_from = life_expectancy
+  ) |>
+  drop_na(BGD, USA) |>
+  mutate(
+    life_expectancy_gap = USA - BGD
+  ) |>
+  arrange(year)
+
+gap_summary <- life_expectancy_gap |>
+  summarize(
+    starting_year = first(year),
+    starting_gap = first(life_expectancy_gap),
+    ending_year = last(year),
+    ending_gap = last(life_expectancy_gap),
+    change_in_gap = last(life_expectancy_gap) -
+      first(life_expectancy_gap)
+  ) |>
+  mutate(
+    across(
+      c(
+        starting_gap,
+        ending_gap,
+        change_in_gap
+      ),
+      ~ round(.x, 2)
+    )
+  )
+
+kable(
+  gap_summary,
+  caption = paste(
+    "Life-Expectancy Gap Between the",
+    "United States and Bangladesh"
+  )
+)
+```
+
+## Change in the Gap Over Time
+
+```{r}
+ggplot(
+  life_expectancy_gap,
+  aes(
+    x = year,
+    y = life_expectancy_gap
+  )
+) +
+  geom_line(
+    color = "#6A3D9A",
+    linewidth = 1
+  ) +
+  labs(
+    title = paste(
+      "Life-Expectancy Gap Between the",
+      "United States and Bangladesh"
+    ),
+    subtitle = paste(
+      "Positive values show how many years",
+      "higher U.S. life expectancy was"
+    ),
+    x = "Year",
+    y = "Difference in Life Expectancy (Years)"
+  ) +
+  theme_minimal()
+```
+
+## Interpretation of the Life-Expectancy Gap
+
+The results confirm that the life-expectancy gap between the two countries became much smaller. In 1960, life expectancy in the United States was 25.79 years higher than in Bangladesh. By 2024, the difference had decreased to only 3.96 years. This means that the gap narrowed by 21.83 years during the period.
+
+The graph also shows a sharp temporary increase in the gap around 1971. According to the World Bank data, Bangladesh’s life expectancy fell to 26.52 years during that year. This period included the Bangladesh Liberation War, political conflict, natural disaster, and severe food insecurity. The value recovered after 1971, and the long-term gap continued to decrease.
+
+## Conclusion
+
+The original World Bank data set was successfully transformed from a wide format with separate year columns into a tidy format containing one row for each country and year. The missing values were kept as `NA` during the transformation and removed only from the data used for analysis.
+
+Both Bangladesh and the United States experienced improvements in life expectancy between 1960 and 2024. However, Bangladesh experienced a much larger increase of 30.95 years, compared with 9.12 years in the United States. As a result, the life-expectancy gap between the two countries decreased from 25.79 years to 3.96 years. These results show that Bangladesh moved substantially closer to the United States in this measurement over time, even though a smaller gap still remained in 2024.
