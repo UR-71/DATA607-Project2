@@ -1,0 +1,447 @@
+---
+title: "Project 2: New York Income Distribution"
+author: "Ummay Rukiya"
+date: "2026-10-09"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: flatly
+execute:
+  echo: true
+  warning: false
+---
+
+## Overview
+
+For this part of Project 2, I will tidy and analyze New York income-distribution data from the U.S. Bureau of Economic Analysis. The Excel file contains a separate worksheet for every year from 2012 through 2024. Within each worksheet, the income groups are stored across multiple columns, so the data must be reorganized before it can be analyzed easily.
+
+My analysis will focus on how the share of disposable personal income received by each income group changed over time. I am especially interested in whether the distribution became more equal or more concentrated among higher-income households between 2012 and 2024.
+
+## Data Source
+
+The data comes from the [U.S. Bureau of Economic Analysis Distribution of Personal Income](https://www.bea.gov/data/special-topics/distribution-of-personal-income). The workbook contains New York income information for every year from 2012 through 2024. Each worksheet reports income ranges and the share of income received by five household-income groups.
+
+I kept the original Excel workbook unchanged so the wide and untidy structure would be preserved before beginning the transformation.
+
+## Loading Required Packages
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(knitr)
+```
+
+## Inspecting the Excel Workbook
+
+The original workbook contains a separate worksheet for every year. I downloaded the workbook from my public GitHub repository and checked the worksheet names to confirm the years available in the file.
+
+```{r}
+data_url <- paste0(
+  "https://raw.githubusercontent.com/UR-71/",
+  "DATA607-Project2/main/",
+  "new_york_income_distribution.xlsx"
+)
+
+excel_file <- tempfile(fileext = ".xlsx")
+
+download.file(
+  data_url,
+  excel_file,
+  mode = "wb",
+  method = "libcurl"
+)
+
+sheet_names <- excel_sheets(excel_file)
+
+sheet_names
+length(sheet_names)
+```
+
+## Importing the Wide-Format Data
+
+Each worksheet uses the same structure. I imported cells A5 through O14 from every worksheet, added the worksheet year as a new column, and combined the results into one dataframe. I initially imported the values as text because the columns contain a mixture of percentages, dollar ranges, blank cells, and unavailable-value symbols.
+
+```{r}
+column_names <- c(
+  "geo_fips",
+  "geo_name",
+  "line_code",
+  "description",
+  "total_millions",
+  "personal_0_20",
+  "personal_20_40",
+  "personal_40_60",
+  "personal_60_80",
+  "personal_80_100",
+  "disposable_0_20",
+  "disposable_20_40",
+  "disposable_40_60",
+  "disposable_60_80",
+  "disposable_80_100"
+)
+
+income_wide <- bind_rows(
+  lapply(sheet_names, function(year_sheet) {
+    read_excel(
+      excel_file,
+      sheet = year_sheet,
+      range = "A5:O14",
+      col_names = column_names,
+      col_types = "text"
+    ) |>
+      mutate(
+        year = as.integer(year_sheet),
+        .before = 1
+      )
+  })
+)
+
+dim(income_wide)
+
+head(income_wide)
+```
+
+## Data Structure Before Tidying
+
+The combined wide-format dataset contains 130 rows and 16 columns. Each year contributes ten rows from its original worksheet. The income groups are still spread across separate columns, including five columns ranked by personal income and five columns ranked by disposable personal income. This is not tidy because the income-group categories are being stored as column names instead of values in one column.
+
+```{r}
+data.frame(
+  rows = nrow(income_wide),
+  columns = ncol(income_wide)
+)
+
+names(income_wide)
+
+income_wide |>
+  select(
+    year,
+    line_code,
+    description,
+    total_millions,
+    starts_with("disposable")
+  ) |>
+  head(6) |>
+  kable(
+    caption = "Sample of the Original Wide-Format Data"
+  )
+```
+
+## Transforming the Data from Wide to Long Format
+
+The first row for each year contains the dollar ranges defining the five income groups, while the remaining rows contain numerical income shares. I separated these two types of information and used `pivot_longer()` to move the ten income-group columns into rows. This created separate columns for the ranking basis, income group, and reported value.
+
+```{r}
+income_ranges_tidy <- income_wide |>
+  filter(line_code == "1") |>
+  select(
+    year,
+    geo_name,
+    starts_with("personal_"),
+    starts_with("disposable_")
+  ) |>
+  pivot_longer(
+    cols = starts_with(c("personal_", "disposable_")),
+    names_to = c("ranking_basis", "income_group"),
+    names_pattern = "(personal|disposable)_(.+)",
+    values_to = "income_range"
+  ) |>
+  mutate(
+    ranking_basis = recode(
+      ranking_basis,
+      personal = "Personal income",
+      disposable = "Disposable personal income"
+    ),
+    income_group = recode(
+      income_group,
+      `0_20` = "Lowest 20%",
+      `20_40` = "Second 20%",
+      `40_60` = "Middle 20%",
+      `60_80` = "Fourth 20%",
+      `80_100` = "Highest 20%"
+    )
+  )
+
+income_shares_tidy <- income_wide |>
+  filter(line_code != "1") |>
+  select(
+    year,
+    geo_name,
+    line_code,
+    description,
+    total_millions,
+    starts_with("personal_"),
+    starts_with("disposable_")
+  ) |>
+  pivot_longer(
+    cols = starts_with(c("personal_", "disposable_")),
+    names_to = c("ranking_basis", "income_group"),
+    names_pattern = "(personal|disposable)_(.+)",
+    values_to = "income_share"
+  ) |>
+  mutate(
+    description = str_squish(description),
+    line_code = as.integer(line_code),
+    total_millions = as.numeric(total_millions),
+    income_share = na_if(income_share, "........"),
+    income_share = as.numeric(income_share),
+    ranking_basis = recode(
+      ranking_basis,
+      personal = "Personal income",
+      disposable = "Disposable personal income"
+    ),
+    income_group = recode(
+      income_group,
+      `0_20` = "Lowest 20%",
+      `20_40` = "Second 20%",
+      `40_60` = "Middle 20%",
+      `60_80` = "Fourth 20%",
+      `80_100` = "Highest 20%"
+    )
+  )
+
+dim(income_ranges_tidy)
+dim(income_shares_tidy)
+
+head(income_shares_tidy)
+```
+
+## Handling Missing and Inconsistent Values
+
+Some cells in the 2023 and 2024 worksheets contain `........` instead of numerical values. These symbols indicate that the detailed income-share values were unavailable. I converted them to `NA` rather than zero because zero would incorrectly suggest that an income group received no income. I kept these missing values in the tidy dataset so the unavailable information remains documented.
+
+```{r}
+missing_value_summary <- income_shares_tidy |>
+  summarise(
+    total_rows = n(),
+    missing_values = sum(is.na(income_share)),
+    percent_missing = round(
+      mean(is.na(income_share)) * 100,
+      2
+    )
+  )
+
+missing_value_summary |>
+  kable(
+    caption = "Missing Values in the Tidy Income-Share Data"
+  )
+```
+
+## Preparing the Disposable-Income Data for Analysis
+
+For the main analysis, I selected the row representing disposable personal income and the five groups ranked by disposable personal income. I converted each share from a decimal to a percentage and arranged the income groups from the lowest 20% to the highest 20%.
+
+```{r}
+income_group_order <- c(
+  "Lowest 20%",
+  "Second 20%",
+  "Middle 20%",
+  "Fourth 20%",
+  "Highest 20%"
+)
+
+disposable_income_analysis <- income_shares_tidy |>
+  filter(
+    line_code == 10,
+    ranking_basis == "Disposable personal income",
+    !is.na(income_share)
+  ) |>
+  mutate(
+    income_group = factor(
+      income_group,
+      levels = income_group_order
+    ),
+    income_percentage = income_share * 100
+  ) |>
+  arrange(year, income_group)
+
+dim(disposable_income_analysis)
+
+head(disposable_income_analysis)
+```
+
+## Comparing Income Shares Across Selected Years
+
+The following table compares the share of New York’s disposable personal income received by each income group in 2012, 2020, and 2024. I included 2020 because the source notes that its estimates were based on a smaller survey sample and should be interpreted carefully.
+
+```{r}
+selected_year_comparison <- disposable_income_analysis |>
+  filter(year %in% c(2012, 2020, 2024)) |>
+  select(
+    income_group,
+    year,
+    income_percentage
+  ) |>
+  pivot_wider(
+    names_from = year,
+    names_prefix = "year_",
+    values_from = income_percentage
+  ) |>
+  mutate(
+    change_2012_to_2024 = round(
+      year_2024 - year_2012,
+      2
+    )
+  )
+
+selected_year_comparison |>
+  kable(
+    col.names = c(
+      "Income Group",
+      "2012 Share (%)",
+      "2020 Share (%)",
+      "2024 Share (%)",
+      "Change, 2012–2024"
+    ),
+    caption = "Disposable Personal Income Shares in Selected Years"
+  )
+```
+
+### Interpretation of the Selected Years
+
+The distribution changed only slightly between 2012 and 2024. The highest-income 20% received more than half of New York’s disposable personal income in both years, although its share decreased from 52.1% to 51.7%. During the same period, the lowest-income group’s share increased from 5.4% to 5.8%. This suggests a small narrowing of the difference, but the distribution remained heavily concentrated among the highest-income households.
+
+The 2020 results show a larger temporary shift. The highest-income group’s share fell to 49.7%, while the fourth income group’s share increased to 20.2%. However, the source warns that the 2020 data came from a smaller survey sample, so this change should be interpreted carefully.
+
+## Changes in Disposable-Income Shares Over Time
+
+The line chart shows how each income group’s share of disposable personal income changed from 2012 through 2024.
+
+```{r}
+ggplot(
+  disposable_income_analysis,
+  aes(
+    x = year,
+    y = income_percentage,
+    color = income_group
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(
+    breaks = seq(2012, 2024, by = 2)
+  ) +
+  labs(
+    title = "New York Disposable Personal Income Shares",
+    subtitle = "Income distribution by household-income group, 2012–2024",
+    x = "Year",
+    y = "Share of Disposable Personal Income (%)",
+    color = "Income Group"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+```
+
+## Changes in Household-Income Ranges
+
+The household-income groups were not defined by the same dollar amounts every year. The following table compares the disposable-income ranges used in 2012, 2020, and 2024.
+
+```{r}
+disposable_income_ranges <- income_ranges_tidy |>
+  filter(
+    ranking_basis == "Disposable personal income"
+  ) |>
+  mutate(
+    income_group = factor(
+      income_group,
+      levels = income_group_order
+    )
+  ) |>
+  arrange(year, income_group)
+
+selected_income_ranges <- disposable_income_ranges |>
+  filter(year %in% c(2012, 2020, 2024)) |>
+  select(
+    income_group,
+    year,
+    income_range
+  ) |>
+  pivot_wider(
+    names_from = year,
+    names_prefix = "year_",
+    values_from = income_range
+  )
+
+selected_income_ranges |>
+  kable(
+    col.names = c(
+      "Income Group",
+      "2012 Income Range",
+      "2020 Income Range",
+      "2024 Income Range"
+    ),
+    caption = "Disposable-Income Group Ranges in Selected Years"
+  )
+```
+
+## Change in Income-Group Boundaries
+
+To measure the change in the ranges, I compared the upper boundary of the lowest 20% with the lower boundary of the highest 20%. The values are reported in nominal dollars, so they have not been adjusted for inflation.
+
+```{r}
+range_cutoff_changes <- disposable_income_ranges |>
+  filter(
+    year %in% c(2012, 2024),
+    income_group %in% c(
+      "Lowest 20%",
+      "Highest 20%"
+    )
+  ) |>
+  mutate(
+    income_cutoff = as.numeric(
+      str_remove_all(
+        income_range,
+        "[^0-9.]"
+      )
+    )
+  ) |>
+  select(
+    income_group,
+    year,
+    income_cutoff
+  ) |>
+  pivot_wider(
+    names_from = year,
+    names_prefix = "year_",
+    values_from = income_cutoff
+  ) |>
+  mutate(
+    dollar_change = year_2024 - year_2012,
+    percent_change = round(
+      dollar_change / year_2012 * 100,
+      2
+    )
+  )
+
+range_cutoff_changes |>
+  kable(
+    col.names = c(
+      "Income Group",
+      "2012 Boundary (USD)",
+      "2024 Boundary (USD)",
+      "Dollar Change",
+      "Percentage Change"
+    ),
+    caption = "Changes in Selected Income-Group Boundaries"
+  )
+```
+
+### Interpretation of the Income Ranges
+
+The dollar boundaries increased substantially between 2012 and 2024. The upper boundary of the lowest-income group increased from \$33,310 to \$54,211, which was a 62.75% increase. The minimum income needed to enter the highest-income group increased from \$85,159 to \$134,265, which was a 57.66% increase.
+
+However, these figures are reported in nominal dollars and were not adjusted for inflation. Therefore, the increases show that the dollar values used to define the groups became higher, but they do not necessarily mean that households gained the same amount of purchasing power.
+
+## Conclusion
+
+The original Excel workbook was successfully imported from GitHub and transformed from a collection of wide-format worksheets into tidy datasets. The income groups were moved from separate columns into rows, the ranking type was stored in its own column, and unavailable values were converted to `NA` instead of being treated as zero.
+
+The results show that New York’s disposable personal income remained highly concentrated among the highest-income households. In 2012, the highest 20% received 52.1% of disposable personal income, compared with 5.4% for the lowest 20%. By 2024, those shares were 51.7% and 5.8%. This represents a small narrowing, but the highest-income group still received almost nine times the share received by the lowest-income group.
+
+The nominal dollar boundaries for the income groups also increased. The upper boundary of the lowest 20% rose to \$54,211, while the lower boundary of the highest 20% rose to \$134,265 by 2024. Because these figures were not adjusted for inflation, they describe changes in the reported dollar ranges rather than changes in purchasing power.
