@@ -1,0 +1,461 @@
+---
+title: "Project 2: U.S. Inflation Rates"
+author: "Ummay Rukiya"
+date: "2026-10-09"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: flatly
+execute:
+  echo: true
+  warning: false
+---
+
+## Overview
+
+For this part of Project 2, I will tidy and analyze annual U.S. inflation-rate data reported by the U.S. Inflation Calculator using Consumer Price Index data from the Bureau of Labor Statistics. The original table is in a wide format because every month is stored in a separate column, along with an annual-average column.
+
+I will transform the monthly columns into a tidy year-month structure and examine how inflation changed over time. I am especially interested in the increase during 2021 and 2022, how quickly inflation decreased afterward, and whether the annual average sometimes hides important monthly changes.
+
+## Data Source
+
+The data comes from the [Annual Inflation Rates table published by the U.S. Inflation Calculator](https://www.usinflationcalculator.com/inflation/current-inflation-rates/). The site reports Consumer Price Index inflation rates based on data from the U.S. Bureau of Labor Statistics. The table contains one row for each year and separate columns for January through December and the annual average.
+
+The monthly values represent the percentage change in consumer prices compared with the same month one year earlier. Some recent values are unavailable because the reporting period is not yet complete or the original source did not publish a value.
+
+## Loading Required Packages
+
+```{r}
+library(rvest)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(knitr)
+```
+
+## Inspecting the Online Data Source
+
+I loaded the webpage directly into R and checked how many HTML tables were available before selecting the annual inflation-rate table.
+
+```{r}
+data_url <- paste0(
+  "https://www.usinflationcalculator.com/",
+  "inflation/current-inflation-rates/"
+)
+
+inflation_page <- read_html(data_url)
+
+inflation_tables <- inflation_page |>
+  html_elements("table") |>
+  html_table(fill = TRUE)
+
+length(inflation_tables)
+
+lapply(
+  inflation_tables,
+  dim
+)
+```
+
+```{r}
+inflation_source_wide <- inflation_tables[[1]]
+
+names(inflation_source_wide)
+
+head(inflation_source_wide)
+
+tail(inflation_source_wide)
+```
+
+## Creating the Raw Wide-Format Data File
+
+The webpage table was imported without recognizing its first row as the header. I assigned clear column names, removed the repeated header row, and saved the remaining wide-format table as a CSV file. At this stage, I did not tidy the monthly columns or replace any unavailable values.
+
+```{r}
+inflation_wide <- inflation_source_wide |>
+  slice(-1)
+
+names(inflation_wide) <- c(
+  "year",
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+  "annual_average"
+)
+
+write.csv(
+  inflation_wide,
+  "us_inflation_rates_wide.csv",
+  row.names = FALSE,
+  na = ""
+)
+
+dim(inflation_wide)
+
+head(inflation_wide)
+
+getwd()
+```
+
+## Importing the Raw Data from GitHub
+
+After creating the wide-format CSV, I uploaded it to my public GitHub repository. I downloaded that saved version directly from GitHub so the tidying and analysis can be reproduced without relying on a file stored on my computer.
+
+```{r}
+raw_data_url <- paste0(
+  "https://raw.githubusercontent.com/UR-71/",
+  "DATA607-Project2/main/",
+  "us_inflation_rates_wide.csv"
+)
+
+raw_csv_file <- tempfile(fileext = ".csv")
+
+download.file(
+  raw_data_url,
+  raw_csv_file,
+  mode = "wb",
+  method = "libcurl"
+)
+
+inflation_wide <- read.csv(
+  raw_csv_file,
+  colClasses = "character",
+  check.names = FALSE
+)
+
+dim(inflation_wide)
+
+head(inflation_wide)
+```
+
+## Data Structure Before Tidying
+
+The raw dataset contains 27 rows and 14 columns. Each row represents one year, while January through December are stored in separate columns. The final column contains the annual average. This is a wide structure because the months are being used as column names instead of values within a month column.
+
+```{r}
+data.frame(
+  rows = nrow(inflation_wide),
+  columns = ncol(inflation_wide)
+)
+
+names(inflation_wide)
+
+inflation_wide |>
+  select(
+    year,
+    jan,
+    feb,
+    mar,
+    apr,
+    may,
+    jun
+  ) |>
+  head(6) |>
+  kable(
+    caption = "Sample of the Original Wide-Format Inflation Data"
+  )
+```
+
+## Transforming the Data from Wide to Long Format
+
+I used `pivot_longer()` to move the twelve month columns into rows. The tidy dataset contains separate columns for the year, month, month number, date, and inflation rate. I kept the annual-average values in a separate dataframe because they describe the entire year rather than one individual month.
+
+```{r}
+inflation_tidy <- inflation_wide |>
+  pivot_longer(
+    cols = jan:dec,
+    names_to = "month",
+    values_to = "inflation_rate_raw"
+  ) |>
+  mutate(
+    year = as.integer(year),
+    month_number = match(
+      month,
+      tolower(month.abb)
+    ),
+    month = factor(
+      str_to_title(month),
+      levels = month.abb
+    ),
+    inflation_rate = suppressWarnings(
+      as.numeric(inflation_rate_raw)
+    ),
+    date = as.Date(
+      sprintf(
+        "%d-%02d-01",
+        year,
+        month_number
+      )
+    )
+  ) |>
+  select(
+    year,
+    month,
+    month_number,
+    date,
+    inflation_rate_raw,
+    inflation_rate
+  ) |>
+  arrange(date)
+
+annual_inflation <- inflation_wide |>
+  transmute(
+    year = as.integer(year),
+    annual_average_raw = annual_average,
+    annual_average = suppressWarnings(
+      as.numeric(annual_average)
+    )
+  ) |>
+  arrange(year)
+
+dim(inflation_tidy)
+
+head(inflation_tidy)
+```
+
+## Handling Missing and Inconsistent Values
+
+The original table contains blank cells and text such as `Avail.Oct.14` and `– (*)` where numerical inflation rates were unavailable. These values became `NA` during the numerical conversion. I did not replace them with zero because zero would represent an actual inflation rate and would change the analysis.
+
+```{r}
+missing_value_summary <- inflation_tidy |>
+  summarise(
+    total_rows = n(),
+    missing_values = sum(
+      is.na(inflation_rate)
+    ),
+    percent_missing = round(
+      mean(is.na(inflation_rate)) * 100,
+      2
+    )
+  )
+
+missing_value_summary |>
+  kable(
+    caption = "Missing Values in the Tidy Monthly Inflation Data"
+  )
+
+inflation_tidy |>
+  filter(
+    is.na(inflation_rate)
+  ) |>
+  select(
+    year,
+    month,
+    inflation_rate_raw
+  ) |>
+  kable(
+    caption = "Monthly Values Recorded as Unavailable"
+  )
+```
+
+## Monthly Inflation Trend
+
+The following chart shows the reported 12-month inflation rate for every available month from 2000 through 2026. Missing observations are excluded from the line but remain recorded as `NA` in the tidy dataset.
+
+```{r}
+inflation_tidy |>
+  filter(
+    !is.na(inflation_rate)
+  ) |>
+  ggplot(
+    aes(
+      x = date,
+      y = inflation_rate
+    )
+  ) +
+  geom_hline(
+    yintercept = 0,
+    color = "gray60",
+    linetype = "dashed"
+  ) +
+  geom_line(
+    color = "steelblue",
+    linewidth = 0.8
+  ) +
+  labs(
+    title = "U.S. Inflation Rate Over Time",
+    subtitle = "Twelve-month CPI inflation rate, 2000–2026",
+    x = "Year",
+    y = "Inflation Rate (%)"
+  ) +
+  theme_minimal()
+```
+
+## The 2021–2022 Inflation Increase
+
+To measure the inflation spike, I identified the month with the highest rate in the dataset and compared it with the latest month containing an available value.
+
+```{r}
+peak_month <- inflation_tidy |>
+  filter(
+    !is.na(inflation_rate)
+  ) |>
+  slice_max(
+    inflation_rate,
+    n = 1,
+    with_ties = FALSE
+  )
+
+latest_month <- inflation_tidy |>
+  filter(
+    !is.na(inflation_rate)
+  ) |>
+  slice_max(
+    date,
+    n = 1,
+    with_ties = FALSE
+  )
+
+inflation_change_summary <- bind_rows(
+  peak_month |>
+    transmute(
+      measurement = "Highest rate",
+      date,
+      inflation_rate
+    ),
+  latest_month |>
+    transmute(
+      measurement = "Latest available rate",
+      date,
+      inflation_rate
+    )
+)
+
+inflation_change_summary |>
+  kable(
+    col.names = c(
+      "Measurement",
+      "Date",
+      "Inflation Rate (%)"
+    ),
+    caption = "Peak and Latest Available Inflation Rates"
+  )
+```
+
+## Interpretation of the Inflation Trend
+
+The highest inflation rate in the dataset was 9.1% in June 2022. This followed a rapid increase that began during 2021. By August 2026, the latest available rate had decreased to 3.4%, which was 5.7 percentage points below the peak. Inflation had therefore slowed substantially after 2022, although the latest rate was still above many of the rates observed before the 2021 increase.
+
+## Annual Average Compared with December Inflation
+
+The annual average summarizes all twelve months, while the December rate shows the inflation rate at the end of the year. Comparing them helps show whether inflation was increasing or decreasing during the year.
+
+```{r}
+december_rates <- inflation_tidy |>
+  filter(
+    month == "Dec",
+    !is.na(inflation_rate)
+  ) |>
+  select(
+    year,
+    december_rate = inflation_rate
+  )
+
+annual_comparison <- annual_inflation |>
+  left_join(
+    december_rates,
+    by = "year"
+  ) |>
+  filter(
+    !is.na(annual_average),
+    !is.na(december_rate)
+  ) |>
+  mutate(
+    december_minus_average = round(
+      december_rate - annual_average,
+      2
+    )
+  )
+
+annual_comparison |>
+  filter(
+    year >= 2019
+  ) |>
+  select(
+    year,
+    annual_average,
+    december_rate,
+    december_minus_average
+  ) |>
+  kable(
+    col.names = c(
+      "Year",
+      "Annual Average (%)",
+      "December Rate (%)",
+      "December Minus Average"
+    ),
+    caption = "Annual Average and December Inflation Rates"
+  )
+```
+
+## Interpretation of the Annual Comparison
+
+The comparison shows why the annual average does not always describe what was happening at the end of a year. In 2021, the annual average was 4.7%, but the December rate had already reached 7.0%. This shows that inflation was increasing quickly and the yearly average hid part of that rise.
+
+The opposite pattern appeared in 2022. Although the annual average was 8.0%, the December rate had fallen to 6.5% after reaching its peak in June. In 2023, the December rate was also lower than the annual average, showing that the decline continued. By 2024, the annual average and December rate were both 2.9%, indicating a more stable pattern during that year.
+
+## Average Inflation Rate by Month
+
+To look for a possible seasonal pattern, I calculated the average inflation rate for each calendar month using the complete years from 2000 through 2024.
+
+```{r}
+monthly_pattern <- inflation_tidy |>
+  filter(
+    year <= 2024,
+    !is.na(inflation_rate)
+  ) |>
+  group_by(
+    month,
+    month_number
+  ) |>
+  summarise(
+    average_inflation = round(
+      mean(inflation_rate),
+      2
+    ),
+    .groups = "drop"
+  ) |>
+  arrange(month_number)
+
+ggplot(
+  monthly_pattern,
+  aes(
+    x = month,
+    y = average_inflation
+  )
+) +
+  geom_col(
+    fill = "darkorange"
+  ) +
+  labs(
+    title = "Average U.S. Inflation Rate by Month",
+    subtitle = "Average twelve-month inflation rate, 2000–2024",
+    x = "Month",
+    y = "Average Inflation Rate (%)"
+  ) +
+  theme_minimal()
+```
+
+## Interpretation of the Monthly Pattern
+
+The bars are nearly the same height, which suggests that the inflation rate did not follow a strong or consistent seasonal pattern across the calendar months. No single month was regularly much higher or lower than the others. The larger changes in inflation appear to be connected more strongly to particular economic periods, such as the increase during 2021 and 2022, than to the month of the year.
+
+## Conclusion
+
+The original inflation table was successfully collected from an online source, saved in its original wide format, uploaded to GitHub, and transformed into a tidy dataset containing one row for each year and month. The unavailable text and blank cells were converted to `NA` rather than zero so they would not distort the results.
+
+The analysis shows that inflation increased rapidly during 2021 and reached a peak of 9.1% in June 2022. By August 2026, it had decreased to 3.4%, although this was still higher than many of the rates observed before the increase. Comparing the annual averages with the December rates also showed that yearly averages can hide important changes. The 2021 average was lower than the December rate because inflation was rising, while the 2022 average was higher than the December rate because inflation had already begun to decline.
+
+The calendar-month averages were very similar, so the data did not show a strong seasonal pattern. Overall, the largest movements were connected to changes across years and economic periods rather than a particular month repeatedly having higher inflation.
